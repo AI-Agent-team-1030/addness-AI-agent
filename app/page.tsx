@@ -5,7 +5,7 @@ import { ChatInputArea } from '@/app/components/ChatInputArea';
 import { ChatMessage } from './components/ChatMessage';
 import React, { useEffect, useState, useRef, useCallback, Suspense } from 'react';
 import { Message } from 'ai';
-import { Sparkles, Home, Users, Menu, MessageSquare, PanelLeft, X, Settings } from 'lucide-react';
+import { Sparkles, Home, Users, Menu, MessageSquare, PanelLeft, X, Settings, FileText, Loader2 } from 'lucide-react';
 import { ModelProvider, useModel } from './components/ModelContext';
 import { ModelSelector } from './components/ModelSelector';
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -19,6 +19,12 @@ import {
   supabase,
 } from '@/lib/supabase';
 import { ConversationList } from './components/ConversationList';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 type UIMessage = Message;
 
@@ -28,10 +34,11 @@ function AppPageContent() {
   const mode = searchParams?.get('mode');
   const isFAQMode = mode === 'faq-auto-response';
   const isContractReviewMode = mode === 'contract-review';
+  const isProposalDifyMode = mode === 'proposal-dify';
   const isPDFAnalysisMode = mode === 'pdf-analysis';
   const isExcelAnalysisMode = mode === 'excel-analysis';
   const isFileAnalysisMode = isPDFAnalysisMode || isExcelAnalysisMode;
-  const isDifyMode = isFAQMode || isContractReviewMode; // FAQと契約書レビューがDifyを使用
+  const isDifyMode = isFAQMode || isContractReviewMode || isProposalDifyMode; // FAQと契約書レビューと提案書生成がDifyを使用
   const router = useRouter();
 
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -49,6 +56,22 @@ function AppPageContent() {
 
   const [statusText, setStatusText] = useState<string>('');
   const [statusIcon, setStatusIcon] = useState<React.ComponentType<any> | null>(null);
+
+  // 提案書生成用のステート
+  const [yakusyoku, setYakusyoku] = useState<string>('');
+  const [busyo, setBusyo] = useState<string>('');
+  const [kadai, setKadai] = useState<string>('');
+
+  // 提案書生成フォーム送信ハンドラー
+  const handleProposalFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!yakusyoku) return;
+
+    // フォーム内容を整形してメッセージとして送信
+    const formattedMessage = `役職: ${yakusyoku}\n所属部署: ${busyo || '未入力'}\n実際の課題感:\n${kadai || '特になし'}`;
+    
+    await sendDifyMessage(formattedMessage);
+  };
 
   const sendFileAnalysisMessage = async (file: File, prompt: string) => {
     setIsFileAnalysisLoading(true);
@@ -681,7 +704,7 @@ function AppPageContent() {
                 <MessageSquare className="w-4 h-4 text-white" />
               </div>
               <span className="font-semibold text-slate-900">
-                {isFAQMode ? 'FAQ自動応答' : isContractReviewMode ? '契約書レビュー' : isPDFAnalysisMode ? 'PDF分析' : isExcelAnalysisMode ? 'Excel分析' : 'チャット'}
+                {isFAQMode ? 'FAQ自動応答' : isContractReviewMode ? '契約書レビュー' : isProposalDifyMode ? '提案書自動生成' : isPDFAnalysisMode ? 'PDF分析' : isExcelAnalysisMode ? 'Excel分析' : 'チャット'}
               </span>
             </div>
           </div>
@@ -711,39 +734,135 @@ function AppPageContent() {
                 <div className={`flex-1 flex flex-col ${currentMessages.length === 0 ? 'justify-center items-center' : 'justify-start'} min-h-0`}>
                   <div className="space-y-0 pb-4 flex-1 flex flex-col">
                     {currentMessages.length === 0 && !isOverallLoading && !error && (
-                      <div className="flex flex-col items-center justify-center flex-1 text-center space-y-8">
-                        <div className="p-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-3xl shadow-2xl">
-                          <Sparkles className="w-16 h-16 text-white" />
-                        </div>
-                        <div className="space-y-4">
-                          <h1 className="text-5xl font-bold leading-[1.2] pb-1">
-                            <span className="bg-gradient-to-r from-slate-900 via-blue-900 to-purple-900 bg-clip-text text-transparent inline-block py-1">
-                              {isFAQMode ? 'FAQ自動応答' : isContractReviewMode ? '契約書レビュー' : isPDFAnalysisMode ? 'PDF分析' : isExcelAnalysisMode ? 'Excel分析' : 'Addness AI Agent'}
-                            </span>
-                          </h1>
-                          <p className="text-xl text-slate-600 max-w-2xl mx-auto mb-8">
-                            {isFAQMode
-                              ? 'よくある質問にお答えします。何でもお聞きください。'
-                              : isContractReviewMode
-                              ? '契約書を分析し、リスクをチェックします。'
-                              : isPDFAnalysisMode
-                              ? 'PDFファイルをAIが詳細に分析します。'
-                              : isExcelAnalysisMode
-                              ? 'Excel/CSVデータをAIが詳細に分析します。'
-                              : 'あなたの最高のAIパートナー。何でもお気軽にお聞きください。'
-                            }
-                          </p>
-                          {!isDifyMode && !isFileAnalysisMode && !isContractReviewMode && (
-                            <div className="flex flex-col items-center gap-4">
-                              <div className="flex items-center gap-2 text-sm text-slate-600">
-                                <Settings className="w-4 h-4" />
-                                <span>AIモデルを選択</span>
+                      <>
+                        {isProposalDifyMode ? (
+                          // 提案書生成モードのフォーム
+                          <div className="flex flex-col items-center justify-center flex-1 w-full max-w-4xl mx-auto space-y-8 px-4">
+                            <div className="text-center space-y-4 mb-2">
+                              <div className="p-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-3xl shadow-2xl mx-auto w-fit">
+                                <FileText className="w-20 h-20 text-white" />
                               </div>
-                              <ModelSelector />
+                              <h1 className="text-5xl font-bold leading-[1.2] pb-1">
+                                <span className="bg-gradient-to-r from-slate-900 via-blue-900 to-purple-900 bg-clip-text text-transparent inline-block py-1">
+                                  提案書自動生成
+                                </span>
+                              </h1>
+                              <p className="text-xl text-slate-600">
+                                役職・部署・課題を入力すると、AIが最適な提案書を自動生成します
+                              </p>
                             </div>
-                          )}
-                        </div>
-                      </div>
+
+                            <Card className="w-full shadow-2xl border-2 border-slate-200">
+                              <CardHeader className="pb-6">
+                                <CardTitle className="flex items-center gap-3 text-2xl">
+                                  <Sparkles className="h-6 w-6 text-blue-600" />
+                                  情報を入力してください
+                                </CardTitle>
+                                <CardDescription className="text-base">
+                                  ご担当者様の情報と課題をご入力ください
+                                </CardDescription>
+                              </CardHeader>
+                              <CardContent>
+                                <form onSubmit={handleProposalFormSubmit} className="space-y-6">
+                                  {/* 役職 */}
+                                  <div className="space-y-3">
+                                    <Label htmlFor="yakusyoku" className="text-base font-semibold">
+                                      役職 <span className="text-red-500">*</span>
+                                    </Label>
+                                    <Select value={yakusyoku} onValueChange={setYakusyoku}>
+                                      <SelectTrigger id="yakusyoku" className="h-14 text-base">
+                                        <SelectValue placeholder="役職を選択してください" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="代表">代表</SelectItem>
+                                        <SelectItem value="管理職">管理職</SelectItem>
+                                        <SelectItem value="役職なし">役職なし</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  {/* 所属部署 */}
+                                  <div className="space-y-3">
+                                    <Label htmlFor="busyo" className="text-base font-semibold">
+                                      所属部署（任意）
+                                    </Label>
+                                    <Input
+                                      id="busyo"
+                                      type="text"
+                                      placeholder="例: 営業部、IT部門"
+                                      value={busyo}
+                                      onChange={(e) => setBusyo(e.target.value)}
+                                      className="h-14 text-base"
+                                    />
+                                  </div>
+
+                                  {/* 実際の課題感 */}
+                                  <div className="space-y-3">
+                                    <Label htmlFor="kadai" className="text-base font-semibold">
+                                      実際の課題感（任意）
+                                    </Label>
+                                    <Textarea
+                                      id="kadai"
+                                      placeholder="現在抱えている課題や問題点を具体的にご記載ください&#10;&#10;例: &#10;- 業務の属人化が進んでおり、特定の担当者に依存している&#10;- データの管理が煩雑で、情報共有がスムーズにできない&#10;- 業務プロセスが非効率で、時間とコストがかかっている"
+                                      value={kadai}
+                                      onChange={(e) => setKadai(e.target.value)}
+                                      className="min-h-[220px] resize-y text-base"
+                                    />
+                                    <p className="text-sm text-slate-500">
+                                      具体的な課題を記載いただくと、より精度の高い提案書が生成されます
+                                    </p>
+                                  </div>
+
+                                  {/* 送信ボタン */}
+                                  <Button
+                                    type="submit"
+                                    disabled={!yakusyoku}
+                                    className="w-full h-14 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg font-semibold"
+                                  >
+                                    <Sparkles className="mr-2 h-6 w-6" />
+                                    提案書を生成する
+                                  </Button>
+                                </form>
+                              </CardContent>
+                            </Card>
+                          </div>
+                        ) : (
+                          // 通常の空の状態
+                          <div className="flex flex-col items-center justify-center flex-1 text-center space-y-8">
+                            <div className="p-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-3xl shadow-2xl">
+                              <Sparkles className="w-16 h-16 text-white" />
+                            </div>
+                            <div className="space-y-4">
+                              <h1 className="text-5xl font-bold leading-[1.2] pb-1">
+                                <span className="bg-gradient-to-r from-slate-900 via-blue-900 to-purple-900 bg-clip-text text-transparent inline-block py-1">
+                                  {isFAQMode ? 'FAQ自動応答' : isContractReviewMode ? '契約書レビュー' : isPDFAnalysisMode ? 'PDF分析' : isExcelAnalysisMode ? 'Excel分析' : 'Addness AI Agent'}
+                                </span>
+                              </h1>
+                              <p className="text-xl text-slate-600 max-w-2xl mx-auto mb-8">
+                                {isFAQMode
+                                  ? 'よくある質問にお答えします。何でもお聞きください。'
+                                  : isContractReviewMode
+                                  ? '契約書を分析し、リスクをチェックします。'
+                                  : isPDFAnalysisMode
+                                  ? 'PDFファイルをAIが詳細に分析します。'
+                                  : isExcelAnalysisMode
+                                  ? 'Excel/CSVデータをAIが詳細に分析します。'
+                                  : 'あなたの最高のAIパートナー。何でもお気軽にお聞きください。'
+                                }
+                              </p>
+                              {!isDifyMode && !isFileAnalysisMode && !isContractReviewMode && (
+                                <div className="flex flex-col items-center gap-4">
+                                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                                    <Settings className="w-4 h-4" />
+                                    <span>AIモデルを選択</span>
+                                  </div>
+                                  <ModelSelector />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {currentMessages.map((m, i) => (
@@ -806,19 +925,21 @@ function AppPageContent() {
           )}
         </div>
         {/* Chat Input Area */}
-        <div className="border-t border-slate-200/50 bg-white/95 backdrop-blur-xl">
-          <ChatInputArea
-            input={input}
-            handleInputChange={handleInputChange}
-            handleSubmit={handleCustomSubmit}
-            isLoading={isOverallLoading}
-            isDeepResearchMode={false}
-            onDeepResearchModeChange={() => { }}
-            isDifyMode={isDifyMode}
-            isFileAnalysisMode={isFileAnalysisMode}
-            fileAnalysisType={isPDFAnalysisMode ? 'pdf' : isExcelAnalysisMode ? 'excel' : undefined}
-          />
-        </div>
+        {!isProposalDifyMode && (
+          <div className="border-t border-slate-200/50 bg-white/95 backdrop-blur-xl">
+            <ChatInputArea
+              input={input}
+              handleInputChange={handleInputChange}
+              handleSubmit={handleCustomSubmit}
+              isLoading={isOverallLoading}
+              isDeepResearchMode={false}
+              onDeepResearchModeChange={() => { }}
+              isDifyMode={isDifyMode}
+              isFileAnalysisMode={isFileAnalysisMode}
+              fileAnalysisType={isPDFAnalysisMode ? 'pdf' : isExcelAnalysisMode ? 'excel' : undefined}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

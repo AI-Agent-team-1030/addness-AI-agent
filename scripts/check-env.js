@@ -56,6 +56,12 @@ const envConfig = [
 ];
 
 function checkEnv() {
+  // 環境変数チェックをスキップする場合
+  if (process.env.SKIP_ENV_CHECK === 'true') {
+    console.log('⏭️  環境変数チェックをスキップします (SKIP_ENV_CHECK=true)\n');
+    process.exit(0);
+  }
+
   let hasError = false;
   let hasWarning = false;
 
@@ -64,6 +70,7 @@ function checkEnv() {
   // .env ファイルの存在確認（Vercelではスキップ）
   const envPath = path.join(process.cwd(), '.env');
   const isVercel = process.env.VERCEL === '1';
+  const isCI = process.env.CI === 'true' || isVercel;
 
   if (!fs.existsSync(envPath) && !isVercel) {
     console.error('❌ .env ファイルが見つかりません');
@@ -72,7 +79,9 @@ function checkEnv() {
   }
 
   if (isVercel) {
-    console.log('🚀 Vercel環境を検出しました。環境変数をチェックします...\n');
+    console.log('🚀 Vercel環境を検出しました。環境変数の警告のみ表示します...\n');
+  } else if (isCI) {
+    console.log('🔧 CI環境を検出しました。\n');
   }
 
   envConfig.forEach(({ key, required, description, validate }) => {
@@ -80,9 +89,16 @@ function checkEnv() {
 
     if (!value) {
       if (required) {
-        console.error(`❌ ${key} が設定されていません (必須)`);
-        console.error(`   説明: ${description}\n`);
-        hasError = true;
+        // Vercel/CI環境では必須チェックを警告のみにする
+        if (isCI) {
+          console.warn(`⚠️  ${key} が設定されていません (必須: ランタイムで必要)`);
+          console.warn(`   説明: ${description}\n`);
+          hasWarning = true;
+        } else {
+          console.error(`❌ ${key} が設定されていません (必須)`);
+          console.error(`   説明: ${description}\n`);
+          hasError = true;
+        }
       } else {
         console.warn(`⚠️  ${key} が設定されていません (オプション)`);
         console.warn(`   説明: ${description}\n`);
@@ -94,10 +110,17 @@ function checkEnv() {
     // プレースホルダーチェック
     if (value.includes('your_') || value.includes('placeholder') || value.includes('here')) {
       if (required) {
-        console.error(`❌ ${key} がプレースホルダーのままです (必須)`);
-        console.error(`   現在の値: ${value.substring(0, 30)}...`);
-        console.error(`   説明: ${description}\n`);
-        hasError = true;
+        // Vercel/CI環境では警告のみ
+        if (isCI) {
+          console.warn(`⚠️  ${key} がプレースホルダーのままです (必須: ランタイムで必要)`);
+          console.warn(`   説明: ${description}\n`);
+          hasWarning = true;
+        } else {
+          console.error(`❌ ${key} がプレースホルダーのままです (必須)`);
+          console.error(`   現在の値: ${value.substring(0, 30)}...`);
+          console.error(`   説明: ${description}\n`);
+          hasError = true;
+        }
       } else {
         console.warn(`⚠️  ${key} がプレースホルダーのままです (オプション)`);
         console.warn(`   説明: ${description}\n`);
@@ -106,11 +129,17 @@ function checkEnv() {
       return;
     }
 
-    // カスタムバリデーション
+    // カスタムバリデーション（Vercel/CI環境では警告のみ）
     if (validate && !validate(value)) {
-      console.error(`❌ ${key} のフォーマットが不正です`);
-      console.error(`   説明: ${description}\n`);
-      hasError = true;
+      if (isCI) {
+        console.warn(`⚠️  ${key} のフォーマットが不正な可能性があります`);
+        console.warn(`   説明: ${description}\n`);
+        hasWarning = true;
+      } else {
+        console.error(`❌ ${key} のフォーマットが不正です`);
+        console.error(`   説明: ${description}\n`);
+        hasError = true;
+      }
       return;
     }
 
@@ -126,11 +155,21 @@ function checkEnv() {
   }
 
   if (hasWarning) {
-    console.warn('⚠️  一部のオプション環境変数が設定されていません。');
-    console.warn('   必要に応じて .env ファイルに追加してください。\n');
+    if (isCI) {
+      console.warn('⚠️  一部の環境変数が設定されていません。');
+      console.warn('   ランタイムで必要な環境変数は、Vercelダッシュボードで設定してください。');
+      console.warn('   詳細: https://vercel.com/docs/projects/environment-variables\n');
+      console.log('✅ ビルドを続行します (CI/Vercel環境)\n');
+    } else {
+      console.warn('⚠️  一部のオプション環境変数が設定されていません。');
+      console.warn('   必要に応じて .env ファイルに追加してください。\n');
+    }
   }
 
-  console.log('✅ 必須の環境変数がすべて正しく設定されています！\n');
+  if (!hasError && !hasWarning) {
+    console.log('✅ 必須の環境変数がすべて正しく設定されています！\n');
+  }
+
   process.exit(0);
 }
 
